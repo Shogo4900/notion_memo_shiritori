@@ -11,17 +11,31 @@ export const DB_MAP = {
   "ら・わ行": "2788b900-6adc-802b-8674-c5ec699817e6",
 };
 
-export function classifyKana(word) {
+function isKanjiOrAlphabet(char) {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  const isAlphabet = (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+  const isKanji = code >= 0x4e00 && code <= 0x9fff;
+  return isAlphabet || isKanji;
+}
+
+function rowFromChar(char) {
+  if (!char) return "あ行";
+  if ("あいうえおアイウエオ".includes(char)) return "あ行";
+  if ("かきくけこがぎぐげごカキクケコガギグゲゴ".includes(char)) return "か行";
+  if ("さしすせそざじずぜぞサシスセソザジズゼゾ".includes(char)) return "さ行";
+  if ("たちつてとだぢづでどタチツテトダヂヅデドなにぬねのナニヌネノ".includes(char)) return "た・な行";
+  if ("はひふへほばびぶべぼぱぴぷぺぽハヒフヘホバビブベボパピプペポ".includes(char)) return "は行";
+  if ("まみむめもマミムメモやゆよヤユヨ".includes(char)) return "ま・や行";
+  if ("らりるれろラリルレロわをんヲンワ".includes(char)) return "ら・わ行";
+  return "あ行";
+}
+
+// 漢字・英字始まりの場合は読み方の先頭文字で分類、それ以外は言葉の先頭文字で分類
+export function classifyKana(word, reading) {
   if (!word) return "あ行";
-  const first = word[0];
-  if ("あいうえおアイウエオ".includes(first)) return "あ行";
-  if ("かきくけこがぎぐげごカキクケコガギグゲゴ".includes(first)) return "か行";
-  if ("さしすせそざじずぜぞサシスセソザジズゼゾ".includes(first)) return "さ行";
-  if ("たちつてとだぢづでどタチツテトダヂヅデドなにぬねのナニヌネノ".includes(first)) return "た・な行";
-  if ("はひふへほばびぶべぼぱぴぷぺぽハヒフヘホバビブベボパピプペポ".includes(first)) return "は行";
-  if ("まみむめもマミムメモやゆよヤユヨ".includes(first)) return "ま・や行";
-  if ("らりるれろラリルレロわをんヲンワ".includes(first)) return "ら・わ行";
-  return "あ行"; // 英字・数字・その他はあ行
+  if (isKanjiOrAlphabet(word[0]) && reading) return rowFromChar(reading[0]);
+  return rowFromChar(word[0]);
 }
 
 async function notionFetch(token, notionPath, method = "POST", body = null) {
