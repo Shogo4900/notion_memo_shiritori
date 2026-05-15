@@ -39,8 +39,8 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    setAutoRow(classifyKana(form.言葉));
-  }, [form.言葉]);
+    setAutoRow(classifyKana(form.言葉, form.読み方));
+  }, [form.言葉, form.読み方]);
 
   const handleAuth = (e) => {
     e.preventDefault();
