@@ -44,15 +44,26 @@ async function notionFetch(token, notionPath, method = "POST", body = null) {
 }
 
 export async function queryDatabase(token, dbId) {
-do {
-  const body = { page_size: 100 };
-  if (cursor) body.start_cursor = cursor;   // ← 続きの位置を指定
-  const data = await notionFetch(..., body);
-  data.results.forEach((p) => allPages.push(...));
-  cursor = data.has_more ? data.next_cursor : undefined;
-} while (cursor);
-}
+  const allPages = [];
+  let cursor = undefined;
 
+  do {
+    const body = { page_size: 100 };
+    if (cursor) body.start_cursor = cursor;
+
+    const data = await notionFetch(
+      token,
+      `/databases/${dbId}/query`,
+      "POST",
+      body
+    );
+
+    data.results.forEach((p) => allPages.push(parseNotionPage(p)));
+    cursor = data.has_more ? data.next_cursor : undefined;
+  } while (cursor);
+
+  return allPages;
+}
 // 検索：言葉・読み方のみ対象
 export async function searchAllDatabases(token, keyword) {
   const results = [];
