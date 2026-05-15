@@ -30,30 +30,20 @@ export default function App() {
   const [searchResults, setSearchResults] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  // 全DBのデータをまとめて保持 { "あ行": [...], ... }
   const [allData, setAllData] = useState({});
   const [loadingRows, setLoadingRows] = useState(new Set());
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // ログイン後すぐに全DB並列取得を開始
-  useEffect(() => {
-    if (!isAuthed || !token) return;
-    prefetchAllDatabases(token);
-
-    // 表示中の行（あ行）を優先的にロード
-    loadRow("あ行");
-    // 残りはバックグラウンドで非同期に
-    Object.keys(DB_MAP).forEach((row) => {
-      if (row !== "あ行") loadRow(row);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthed, token]);
-
+  // loadRow を先に定義
   const loadRow = useCallback(async (row) => {
-    if (allData[row]) return; // キャッシュ済みならスキップ
-    setLoadingRows((prev) => new Set(prev).add(row));
+    setLoadingRows((prev) => {
+      if (prev.has(row)) return prev; // 取得中なら何もしない
+      const next = new Set(prev);
+      next.add(row);
+      return next;
+    });
     try {
       const data = await queryDatabase(token, DB_MAP[row]);
       setAllData((prev) => ({ ...prev, [row]: data }));
@@ -66,7 +56,14 @@ export default function App() {
         return next;
       });
     }
-  }, [token, allData]);
+  }, [token]);
+
+  // ログイン後すぐに全DB並列取得を開始
+  useEffect(() => {
+    if (!isAuthed || !token) return;
+    prefetchAllDatabases(token);
+    Object.keys(DB_MAP).forEach((row) => loadRow(row));
+  }, [isAuthed, token, loadRow]);
 
   useEffect(() => {
     if (token) localStorage.setItem(STORAGE_KEY, token);
@@ -107,7 +104,6 @@ export default function App() {
       });
       setAddStatus("success");
       setForm({ 言葉: "", 読み方: "", 意味: "" });
-      // キャッシュが更新されたので allData も再反映
       const updated = await queryDatabase(token, dbId);
       setAllData((prev) => ({ ...prev, [autoRow]: updated }));
       setTimeout(() => setAddStatus(null), 3000);
@@ -117,19 +113,40 @@ export default function App() {
     }
   };
 
-  const handleSearch = async (e) => {
+  const allLoaded = useMemo(
+    () => Object.keys(DB_MAP).every((row) => !!allData[row]),
+    [allData]
+  );
+
+  const searchInCache = useCallback((keyword) => {
+    const results = [];
+    Object.entries(allData).forEach(([rowName, pages]) => {
+      pages?.forEach((p) => {
+        if (p.言葉?.includes(keyword) || p.読み方?.includes(keyword)) {
+          results.push({ ...p, _row: rowName });
+        }
+      });
+    });
+    return results;
+  }, [allData]);
+
+  const handleSearchFast = async (e) => {
     e.preventDefault();
     if (!searchKeyword.trim()) return;
-    setIsSearching(true);
-    setSearchResults(null);
-    try {
-      const results = await searchAllDatabases(token, searchKeyword.trim());
-      setSearchResults(results);
-    } catch (err) {
-      alert("検索エラー: " + err.message);
-      setSearchResults([]);
-    } finally {
-      setIsSearching(false);
+    if (allLoaded) {
+      setSearchResults(searchInCache(searchKeyword.trim()));
+    } else {
+      setIsSearching(true);
+      setSearchResults(null);
+      try {
+        const results = await searchAllDatabases(token, searchKeyword.trim());
+        setSearchResults(results);
+      } catch (err) {
+        alert("検索エラー: " + err.message);
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
     }
   };
 
@@ -137,13 +154,10 @@ export default function App() {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
-      // どの行のDBに属するか特定
-      const rowName = Object.entries(DB_MAP).find(
-        ([, dbId]) => allData[Object.keys(DB_MAP).find((r) => DB_MAP[r] === dbId)]
-          ?.some((p) => p.id === deleteTarget.id)
-      )?.[0] ?? selectedRow;
-      await deletePage(token, deleteTarget.id, DB_MAP[rowName]);
-      // allData から除去
+      const rowName = Object.keys(DB_MAP).find((row) =>
+        allData[row]?.some((p) => p.id === deleteTarget.id)
+      );
+      await deletePage(token, deleteTarget.id, rowName ? DB_MAP[rowName] : undefined);
       setAllData((prev) => {
         const next = { ...prev };
         Object.keys(next).forEach((row) => {
@@ -164,47 +178,6 @@ export default function App() {
 
   const browseData = allData[selectedRow] ?? [];
   const isBrowseLoading = loadingRows.has(selectedRow);
-
-  // 検索はキャッシュ済みデータからインメモリで即時実行する補助関数
-  const searchInCache = useCallback((keyword) => {
-    const results = [];
-    Object.entries(allData).forEach(([rowName, pages]) => {
-      pages?.forEach((p) => {
-        if (p.言葉?.includes(keyword) || p.読み方?.includes(keyword)) {
-          results.push({ ...p, _row: rowName });
-        }
-      });
-    });
-    return results;
-  }, [allData]);
-
-  // 全DB読み込み済みかどうか
-  const allLoaded = useMemo(
-    () => Object.keys(DB_MAP).every((row) => !!allData[row]),
-    [allData]
-  );
-
-  const handleSearchFast = async (e) => {
-    e.preventDefault();
-    if (!searchKeyword.trim()) return;
-    if (allLoaded) {
-      // キャッシュ済みなら即座に結果表示
-      setSearchResults(searchInCache(searchKeyword.trim()));
-    } else {
-      // まだ取得中ならAPIへ
-      setIsSearching(true);
-      setSearchResults(null);
-      try {
-        const results = await searchAllDatabases(token, searchKeyword.trim());
-        setSearchResults(results);
-      } catch (err) {
-        alert("検索エラー: " + err.message);
-        setSearchResults([]);
-      } finally {
-        setIsSearching(false);
-      }
-    }
-  };
 
   if (!isAuthed) {
     return (
@@ -244,9 +217,7 @@ export default function App() {
           <h1>「ル」メモ管理</h1>
         </div>
         <div className="header-right">
-          {!allLoaded && (
-            <span className="loading-badge">読込中…</span>
-          )}
+          {!allLoaded && <span className="loading-badge">読込中…</span>}
           <button className="btn-logout" onClick={handleLogout}>ログアウト</button>
         </div>
       </header>
@@ -269,7 +240,6 @@ export default function App() {
 
       <main className="main-content">
 
-        {/* ── 追加 ── */}
         {activeTab === "add" && (
           <div className="tab-panel">
             <div className="panel-header">
@@ -287,14 +257,12 @@ export default function App() {
                   required
                 />
               </div>
-
               {form.言葉 && (
                 <div className="auto-classify">
                   <span className="classify-label">分類先：</span>
                   <span className="classify-badge">{autoRow}</span>
                 </div>
               )}
-
               <div className="form-group">
                 <label>漢字または英字の読み方</label>
                 <input
@@ -304,7 +272,6 @@ export default function App() {
                   placeholder="例：るーびっくきゅーぶ"
                 />
               </div>
-
               <div className="form-group">
                 <label>意味</label>
                 <textarea
@@ -314,7 +281,6 @@ export default function App() {
                   rows={4}
                 />
               </div>
-
               <button
                 type="submit"
                 className="btn-primary"
@@ -322,7 +288,6 @@ export default function App() {
               >
                 {addStatus === "loading" ? "追加中…" : "追加する"}
               </button>
-
               {addStatus === "success" && (
                 <div className="status-message success">✓ 「{autoRow}」に追加しました！</div>
               )}
@@ -333,7 +298,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ── 検索 ── */}
         {activeTab === "search" && (
           <div className="tab-panel">
             <div className="panel-header">
@@ -357,9 +321,7 @@ export default function App() {
                 </button>
               </div>
             </form>
-
             {isSearching && <div className="loading">全データベースを検索中…</div>}
-
             {!isSearching && searchResults !== null && searchResults.length > 0 && (
               <div className="results-section">
                 <div className="results-count">{searchResults.length} 件</div>
@@ -370,14 +332,12 @@ export default function App() {
                 </div>
               </div>
             )}
-
             {!isSearching && searchResults !== null && searchResults.length === 0 && (
               <div className="empty-state">一致する言葉が見つかりませんでした</div>
             )}
           </div>
         )}
 
-        {/* ── 一覧 ── */}
         {activeTab === "browse" && (
           <div className="tab-panel">
             <div className="panel-header">
@@ -395,9 +355,7 @@ export default function App() {
                 </button>
               ))}
             </div>
-
             {isBrowseLoading && <div className="loading">読み込み中…</div>}
-
             {!isBrowseLoading && browseData.length > 0 && (
               <div className="results-section">
                 <div className="results-count">{browseData.length} 件</div>
@@ -408,7 +366,6 @@ export default function App() {
                 </div>
               </div>
             )}
-
             {!isBrowseLoading && browseData.length === 0 && (
               <div className="empty-state">データがありません</div>
             )}
