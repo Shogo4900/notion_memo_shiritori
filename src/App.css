@@ -522,3 +522,27 @@ body {
   .main-content { padding: 1rem 0.75rem; }
   .tab-btn { padding: 0.625rem 0.75rem; font-size: 0.8125rem; }
 }
+
+/* ===== 追加スタイル（高速化対応） ===== */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loading-badge {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.row-loading {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  margin-left: 2px;
+}

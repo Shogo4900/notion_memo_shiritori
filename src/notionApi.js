@@ -1,4 +1,3 @@
-// Vercel Serverless Function経由でNotion APIを呼び出す
 const PROXY = "/api/notion";
 
 export const DB_MAP = {
@@ -11,6 +10,7 @@ export const DB_MAP = {
   "ら・わ行": "2788b900-6adc-802b-8674-c5ec699817e6",
 };
 
+// ── 分類ロジック ──────────────────────────────
 function isKanjiOrAlphabet(char) {
   if (!char) return false;
   const code = char.charCodeAt(0);
@@ -31,24 +31,20 @@ function rowFromChar(char) {
   return "あ行";
 }
 
-// 漢字・英字始まりの場合は読み方の先頭文字で分類、それ以外は言葉の先頭文字で分類
 export function classifyKana(word, reading) {
   if (!word) return "あ行";
   if (isKanjiOrAlphabet(word[0]) && reading) return rowFromChar(reading[0]);
   return rowFromChar(word[0]);
 }
 
+// ── Notion APIへのリクエスト ──────────────────
 async function notionFetch(token, notionPath, method = "POST", body = null) {
   const url = `${PROXY}?path=${encodeURIComponent(notionPath)}`;
   const opts = {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      "x-notion-token": token,
-    },
+    headers: { "Content-Type": "application/json", "x-notion-token": token },
   };
   if (body) opts.body = JSON.stringify(body);
-
   const res = await fetch(url, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -57,48 +53,74 @@ async function notionFetch(token, notionPath, method = "POST", body = null) {
   return res.json();
 }
 
-export async function queryDatabase(token, dbId) {
+// ── 1DBの全件取得（ページネーション対応）─────
+async function fetchAllPages(token, dbId) {
   const allPages = [];
   let cursor = undefined;
-
   do {
     const body = { page_size: 100 };
     if (cursor) body.start_cursor = cursor;
-
-    const data = await notionFetch(
-      token,
-      `/databases/${dbId}/query`,
-      "POST",
-      body
-    );
-
+    const data = await notionFetch(token, `/databases/${dbId}/query`, "POST", body);
     data.results.forEach((p) => allPages.push(parseNotionPage(p)));
     cursor = data.has_more ? data.next_cursor : undefined;
   } while (cursor);
-
   return allPages;
 }
-// 検索：言葉・読み方のみ対象
-export async function searchAllDatabases(token, keyword) {
-  const results = [];
-  for (const [rowName, dbId] of Object.entries(DB_MAP)) {
-    try {
-      const pages = await queryDatabase(token, dbId);
-      const filtered = pages.filter(
-        (p) =>
-          p.言葉?.includes(keyword) ||
-          p.読み方?.includes(keyword)
-      );
-      filtered.forEach((p) => results.push({ ...p, _row: rowName }));
-    } catch (e) {
-      console.error(`${rowName} 検索失敗:`, e);
-    }
-  }
-  return results;
+
+// ── キャッシュ ────────────────────────────────
+// { dbId: Promise<page[]> } の形で保持。Promiseごとキャッシュすることで
+// 同じDBへの並行リクエストが重複しない。
+const cache = {};
+
+export function invalidateCache(dbId) {
+  delete cache[dbId];
 }
 
+export function invalidateAllCache() {
+  Object.keys(cache).forEach((k) => delete cache[k]);
+}
+
+// キャッシュがあればそれを返し、なければfetchしてキャッシュする
+function getCached(token, dbId) {
+  if (!cache[dbId]) {
+    cache[dbId] = fetchAllPages(token, dbId);
+  }
+  return cache[dbId];
+}
+
+// ── 公開API ───────────────────────────────────
+
+// 全DBを並列で事前取得（ログイン後すぐ呼ぶ）
+export function prefetchAllDatabases(token) {
+  Object.values(DB_MAP).forEach((dbId) => getCached(token, dbId));
+}
+
+// 1DBの全件取得（キャッシュ利用）
+export async function queryDatabase(token, dbId) {
+  return getCached(token, dbId);
+}
+
+// 検索：全DBを並列取得してフィルタ
+export async function searchAllDatabases(token, keyword) {
+  const entries = await Promise.all(
+    Object.entries(DB_MAP).map(async ([rowName, dbId]) => {
+      try {
+        const pages = await getCached(token, dbId);
+        return pages
+          .filter((p) => p.言葉?.includes(keyword) || p.読み方?.includes(keyword))
+          .map((p) => ({ ...p, _row: rowName }));
+      } catch (e) {
+        console.error(`${rowName} 検索失敗:`, e);
+        return [];
+      }
+    })
+  );
+  return entries.flat();
+}
+
+// 追加：Notionに書き込んだあとキャッシュを更新
 export async function addEntry(token, dbId, { 言葉, 読み方, 意味 }) {
-  return notionFetch(token, "/pages", "POST", {
+  const result = await notionFetch(token, "/pages", "POST", {
     parent: { database_id: dbId },
     properties: {
       言葉: { title: [{ text: { content: 言葉 } }] },
@@ -106,10 +128,23 @@ export async function addEntry(token, dbId, { 言葉, 読み方, 意味 }) {
       意味: { rich_text: [{ text: { content: 意味 || "" } }] },
     },
   });
+  // キャッシュに新エントリを追加
+  if (cache[dbId]) {
+    cache[dbId] = cache[dbId].then((pages) => [
+      ...pages,
+      parseNotionPage(result),
+    ]);
+  }
+  return result;
 }
 
-export async function deletePage(token, pageId) {
-  return notionFetch(token, `/pages/${pageId}`, "PATCH", { archived: true });
+// 削除：Notionでアーカイブしたあとキャッシュから除去
+export async function deletePage(token, pageId, dbId) {
+  const result = await notionFetch(token, `/pages/${pageId}`, "PATCH", { archived: true });
+  if (dbId && cache[dbId]) {
+    cache[dbId] = cache[dbId].then((pages) => pages.filter((p) => p.id !== pageId));
+  }
+  return result;
 }
 
 function parseNotionPage(page) {

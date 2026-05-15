@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   DB_MAP,
   classifyKana,
@@ -6,6 +6,8 @@ import {
   searchAllDatabases,
   addEntry,
   deletePage,
+  prefetchAllDatabases,
+  invalidateAllCache,
 } from "./notionApi";
 import "./App.css";
 
@@ -25,14 +27,46 @@ export default function App() {
   const [addError, setAddError] = useState("");
 
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [searchResults, setSearchResults] = useState(null); // null = 未検索
+  const [searchResults, setSearchResults] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  const [browseData, setBrowseData] = useState([]);
-  const [isBrowseLoading, setIsBrowseLoading] = useState(false);
+  // 全DBのデータをまとめて保持 { "あ行": [...], ... }
+  const [allData, setAllData] = useState({});
+  const [loadingRows, setLoadingRows] = useState(new Set());
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // ログイン後すぐに全DB並列取得を開始
+  useEffect(() => {
+    if (!isAuthed || !token) return;
+    prefetchAllDatabases(token);
+
+    // 表示中の行（あ行）を優先的にロード
+    loadRow("あ行");
+    // 残りはバックグラウンドで非同期に
+    Object.keys(DB_MAP).forEach((row) => {
+      if (row !== "あ行") loadRow(row);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthed, token]);
+
+  const loadRow = useCallback(async (row) => {
+    if (allData[row]) return; // キャッシュ済みならスキップ
+    setLoadingRows((prev) => new Set(prev).add(row));
+    try {
+      const data = await queryDatabase(token, DB_MAP[row]);
+      setAllData((prev) => ({ ...prev, [row]: data }));
+    } catch (err) {
+      console.error(`${row} 取得失敗:`, err);
+    } finally {
+      setLoadingRows((prev) => {
+        const next = new Set(prev);
+        next.delete(row);
+        return next;
+      });
+    }
+  }, [token, allData]);
 
   useEffect(() => {
     if (token) localStorage.setItem(STORAGE_KEY, token);
@@ -52,9 +86,11 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem(STORAGE_KEY);
+    invalidateAllCache();
     setToken("");
     setTokenInput("");
     setIsAuthed(false);
+    setAllData({});
   };
 
   const handleAdd = async (e) => {
@@ -63,13 +99,17 @@ export default function App() {
     setAddStatus("loading");
     setAddError("");
     try {
-      await addEntry(token, DB_MAP[autoRow], {
+      const dbId = DB_MAP[autoRow];
+      await addEntry(token, dbId, {
         言葉: form.言葉.trim(),
         読み方: form.読み方.trim(),
         意味: form.意味.trim(),
       });
       setAddStatus("success");
       setForm({ 言葉: "", 読み方: "", 意味: "" });
+      // キャッシュが更新されたので allData も再反映
+      const updated = await queryDatabase(token, dbId);
+      setAllData((prev) => ({ ...prev, [autoRow]: updated }));
       setTimeout(() => setAddStatus(null), 3000);
     } catch (err) {
       setAddStatus("error");
@@ -93,35 +133,76 @@ export default function App() {
     }
   };
 
-  const loadBrowse = useCallback(async (row) => {
-    setIsBrowseLoading(true);
-    setBrowseData([]);
-    try {
-      const data = await queryDatabase(token, DB_MAP[row]);
-      setBrowseData(data);
-    } catch (err) {
-      alert("読み込みエラー: " + err.message);
-    } finally {
-      setIsBrowseLoading(false);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    if (activeTab === "browse" && isAuthed) loadBrowse(selectedRow);
-  }, [activeTab, selectedRow, isAuthed, loadBrowse]);
-
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
-      await deletePage(token, deleteTarget.id);
-      setBrowseData((prev) => prev.filter((p) => p.id !== deleteTarget.id));
-      setSearchResults((prev) => prev ? prev.filter((p) => p.id !== deleteTarget.id) : prev);
+      // どの行のDBに属するか特定
+      const rowName = Object.entries(DB_MAP).find(
+        ([, dbId]) => allData[Object.keys(DB_MAP).find((r) => DB_MAP[r] === dbId)]
+          ?.some((p) => p.id === deleteTarget.id)
+      )?.[0] ?? selectedRow;
+      await deletePage(token, deleteTarget.id, DB_MAP[rowName]);
+      // allData から除去
+      setAllData((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((row) => {
+          if (next[row]) next[row] = next[row].filter((p) => p.id !== deleteTarget.id);
+        });
+        return next;
+      });
+      setSearchResults((prev) =>
+        prev ? prev.filter((p) => p.id !== deleteTarget.id) : prev
+      );
       setDeleteTarget(null);
     } catch (err) {
       alert("削除エラー: " + err.message);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const browseData = allData[selectedRow] ?? [];
+  const isBrowseLoading = loadingRows.has(selectedRow);
+
+  // 検索はキャッシュ済みデータからインメモリで即時実行する補助関数
+  const searchInCache = useCallback((keyword) => {
+    const results = [];
+    Object.entries(allData).forEach(([rowName, pages]) => {
+      pages?.forEach((p) => {
+        if (p.言葉?.includes(keyword) || p.読み方?.includes(keyword)) {
+          results.push({ ...p, _row: rowName });
+        }
+      });
+    });
+    return results;
+  }, [allData]);
+
+  // 全DB読み込み済みかどうか
+  const allLoaded = useMemo(
+    () => Object.keys(DB_MAP).every((row) => !!allData[row]),
+    [allData]
+  );
+
+  const handleSearchFast = async (e) => {
+    e.preventDefault();
+    if (!searchKeyword.trim()) return;
+    if (allLoaded) {
+      // キャッシュ済みなら即座に結果表示
+      setSearchResults(searchInCache(searchKeyword.trim()));
+    } else {
+      // まだ取得中ならAPIへ
+      setIsSearching(true);
+      setSearchResults(null);
+      try {
+        const results = await searchAllDatabases(token, searchKeyword.trim());
+        setSearchResults(results);
+      } catch (err) {
+        alert("検索エラー: " + err.message);
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
     }
   };
 
@@ -162,7 +243,12 @@ export default function App() {
           <span className="header-icon">📝</span>
           <h1>「ル」メモ管理</h1>
         </div>
-        <button className="btn-logout" onClick={handleLogout}>ログアウト</button>
+        <div className="header-right">
+          {!allLoaded && (
+            <span className="loading-badge">読込中…</span>
+          )}
+          <button className="btn-logout" onClick={handleLogout}>ログアウト</button>
+        </div>
       </header>
 
       <nav className="tab-nav">
@@ -215,7 +301,7 @@ export default function App() {
                   type="text"
                   value={form.読み方}
                   onChange={(e) => setForm({ ...form, 読み方: e.target.value })}
-                  placeholder="例：Rubik's Cube"
+                  placeholder="例：るーびっくきゅーぶ"
                 />
               </div>
 
@@ -254,7 +340,7 @@ export default function App() {
               <h2>検索</h2>
               <p>全データベースの「言葉」「読み方」を検索します</p>
             </div>
-            <form onSubmit={handleSearch} className="search-form">
+            <form onSubmit={handleSearchFast} className="search-form">
               <div className="search-input-row">
                 <input
                   type="text"
@@ -305,6 +391,7 @@ export default function App() {
                   onClick={() => setSelectedRow(row)}
                 >
                   {row}
+                  {loadingRows.has(row) && <span className="row-loading">…</span>}
                 </button>
               ))}
             </div>
@@ -329,7 +416,6 @@ export default function App() {
         )}
       </main>
 
-      {/* 削除確認モーダル */}
       {deleteTarget && (
         <div className="modal-overlay" onClick={() => !isDeleting && setDeleteTarget(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
