@@ -156,3 +156,14 @@ function parseNotionPage(page) {
     意味: props.意味?.rich_text?.[0]?.plain_text || "",
   };
 }
+
+// エントリ更新
+export async function updateEntry(token, pageId, { 言葉, 読み方, 意味 }) {
+  return notionFetch(token, `/pages/${pageId}`, "PATCH", {
+    properties: {
+      言葉: { title: [{ text: { content: 言葉 } }] },
+      漢字または英字の読み方: { rich_text: [{ text: { content: 読み方 || "" } }] },
+      意味: { rich_text: [{ text: { content: 意味 || "" } }] },
+    },
+  });
+}
