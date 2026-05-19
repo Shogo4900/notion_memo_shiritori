@@ -1,3 +1,14 @@
+// ひらがな↔カタカナ相互変換して両方にマッチするか判定
+export function flexMatch(text, keyword) {
+  if (!text || !keyword) return false;
+  if (text.includes(keyword)) return true;
+  // ひらがな→カタカナ変換
+  const toKata = (s) => s.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
+  // カタカナ→ひらがな変換
+  const toHira = (s) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  return text.includes(toKata(keyword)) || text.includes(toHira(keyword));
+}
+
 const PROXY = "/api/notion";
 
 export const DB_MAP = {
@@ -101,13 +112,16 @@ export async function queryDatabase(token, dbId) {
 }
 
 // 検索：全DBを並列取得してフィルタ
-export async function searchAllDatabases(token, keyword) {
+export async function searchAllDatabases(token, keyword, mode = "word") {
   const entries = await Promise.all(
     Object.entries(DB_MAP).map(async ([rowName, dbId]) => {
       try {
         const pages = await getCached(token, dbId);
         return pages
-          .filter((p) => p.言葉?.includes(keyword) || p.読み方?.includes(keyword))
+          .filter((p) => {
+            if (mode === "meaning") return flexMatch(p.意味, keyword);
+            return flexMatch(p.言葉, keyword) || flexMatch(p.読み方, keyword);
+          })
           .map((p) => ({ ...p, _row: rowName }));
       } catch (e) {
         console.error(`${rowName} 検索失敗:`, e);
