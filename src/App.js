@@ -10,6 +10,7 @@ import {
   updateEntry,
   prefetchAllDatabases,
   invalidateAllCache,
+  flexMatch,
 } from "./notionApi";
 import "./App.css";
 
@@ -33,7 +34,9 @@ export default function App() {
   const [addStatus, setAddStatus] = useState(null);
   const [addError, setAddError] = useState("");
 
+  // 検索
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [searchMode, setSearchMode] = useState("word"); // "word" | "meaning"
   const [searchResults, setSearchResults] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
 
@@ -42,6 +45,9 @@ export default function App() {
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // 要確認フィルター: "reading"=読み方なし, "meaning"=意味なし, "word"=言葉なし
+  const [missingFilter, setMissingFilter] = useState("reading");
 
   // ── loadRow ──────────────────────────────────
   const loadRow = useCallback(async (row) => {
@@ -79,7 +85,7 @@ export default function App() {
     setAutoRow(classifyKana(form.言葉, form.読み方));
   }, [form.言葉, form.読み方]);
 
-  // allData のエントリを1件更新するヘルパー
+  // allData のエントリを1件更新
   const updateEntryInState = useCallback((pageId, updated) => {
     setAllData((prev) => {
       const next = { ...prev };
@@ -93,9 +99,7 @@ export default function App() {
       return next;
     });
     setSearchResults((prev) =>
-      prev
-        ? prev.map((p) => (p.id === pageId ? { ...p, ...updated } : p))
-        : prev
+      prev ? prev.map((p) => (p.id === pageId ? { ...p, ...updated } : p)) : prev
     );
   }, []);
 
@@ -147,13 +151,14 @@ export default function App() {
     [allData]
   );
 
-  const searchInCache = useCallback((keyword) => {
+  const searchInCache = useCallback((keyword, mode) => {
     const results = [];
     Object.entries(allData).forEach(([rowName, pages]) => {
       pages?.forEach((p) => {
-        if (p.言葉?.includes(keyword) || p.読み方?.includes(keyword)) {
-          results.push({ ...p, _row: rowName });
-        }
+        const hit = mode === "meaning"
+          ? flexMatch(p.意味, keyword)
+          : flexMatch(p.言葉, keyword) || flexMatch(p.読み方, keyword);
+        if (hit) results.push({ ...p, _row: rowName });
       });
     });
     return results;
@@ -163,12 +168,12 @@ export default function App() {
     e.preventDefault();
     if (!searchKeyword.trim()) return;
     if (allLoaded) {
-      setSearchResults(searchInCache(searchKeyword.trim()));
+      setSearchResults(searchInCache(searchKeyword.trim(), searchMode));
     } else {
       setIsSearching(true);
       setSearchResults(null);
       try {
-        const results = await searchAllDatabases(token, searchKeyword.trim());
+        const results = await searchAllDatabases(token, searchKeyword.trim(), searchMode);
         setSearchResults(results);
       } catch (err) {
         alert("検索エラー: " + err.message);
@@ -177,6 +182,12 @@ export default function App() {
         setIsSearching(false);
       }
     }
+  };
+
+  // 検索モード切替時に結果をリセット
+  const handleModeChange = (mode) => {
+    setSearchMode(mode);
+    setSearchResults(null);
   };
 
   // ── 削除 ─────────────────────────────────────
@@ -210,16 +221,30 @@ export default function App() {
   const browseData = allData[selectedRow] ?? [];
   const isBrowseLoading = loadingRows.has(selectedRow);
 
-  const missingReadingEntries = useMemo(() => {
+  // 要確認: フィルター別
+  const missingEntries = useMemo(() => {
     const results = [];
     Object.entries(allData).forEach(([rowName, pages]) => {
       pages?.forEach((p) => {
-        if (containsKanjiOrAlphabet(p.言葉) && !p.読み方) {
-          results.push({ ...p, _row: rowName });
-        }
+        let hit = false;
+        if (missingFilter === "reading") hit = containsKanjiOrAlphabet(p.言葉) && !p.読み方;
+        if (missingFilter === "meaning") hit = !p.意味;
+        if (missingFilter === "word")    hit = !p.言葉;
+        if (hit) results.push({ ...p, _row: rowName });
       });
     });
     return results;
+  }, [allData, missingFilter]);
+
+  // タブバッジ用: 全フィルター合計
+  const totalMissing = useMemo(() => {
+    let count = 0;
+    Object.values(allData).forEach((pages) => {
+      pages?.forEach((p) => {
+        if ((containsKanjiOrAlphabet(p.言葉) && !p.読み方) || !p.意味 || !p.言葉) count++;
+      });
+    });
+    return count;
   }, [allData]);
 
   const needsReadingWarning = containsKanjiOrAlphabet(form.言葉) && !form.読み方.trim();
@@ -270,10 +295,10 @@ export default function App() {
 
       <nav className="tab-nav">
         {[
-          { key: "add", label: "＋ 追加" },
-          { key: "search", label: "🔍 検索" },
-          { key: "browse", label: "📋 一覧" },
-          { key: "missing", label: missingReadingEntries.length > 0 ? `⚠️ 要確認 (${missingReadingEntries.length})` : "⚠️ 要確認" },
+          { key: "add",     label: "＋ 追加" },
+          { key: "search",  label: "🔍 検索" },
+          { key: "browse",  label: "📋 一覧" },
+          { key: "missing", label: totalMissing > 0 ? `⚠️ 要確認 (${totalMissing})` : "⚠️ 要確認" },
         ].map((t) => (
           <button
             key={t.key}
@@ -356,15 +381,31 @@ export default function App() {
           <div className="tab-panel">
             <div className="panel-header">
               <h2>検索</h2>
-              <p>全データベースの「言葉」「読み方」を検索します</p>
             </div>
+
+            {/* モード切替 */}
+            <div className="filter-selector" style={{ marginBottom: "1rem" }}>
+              <button
+                className={`row-btn ${searchMode === "word" ? "active" : ""}`}
+                onClick={() => handleModeChange("word")}
+              >
+                言葉・読み方
+              </button>
+              <button
+                className={`row-btn ${searchMode === "meaning" ? "active" : ""}`}
+                onClick={() => handleModeChange("meaning")}
+              >
+                意味
+              </button>
+            </div>
+
             <form onSubmit={handleSearchFast} className="search-form">
               <div className="search-input-row">
                 <input
                   type="text"
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
-                  placeholder="キーワードを入力…"
+                  placeholder={searchMode === "meaning" ? "意味のキーワードを入力…" : "言葉・読み方のキーワードを入力…"}
                 />
                 <button
                   type="submit"
@@ -375,6 +416,11 @@ export default function App() {
                 </button>
               </div>
             </form>
+
+            {searchMode === "word" && (
+              <p className="search-hint">言葉・読み方のどちらにも含まれるものを検索します</p>
+            )}
+
             {isSearching && <div className="loading">全データベースを検索中…</div>}
             {!isSearching && searchResults !== null && searchResults.length > 0 && (
               <div className="results-section">
@@ -445,17 +491,40 @@ export default function App() {
           <div className="tab-panel">
             <div className="panel-header">
               <h2>要確認リスト</h2>
-              <p>漢字または英字を含むのに「読み方」が未入力のエントリです</p>
             </div>
+
+            {/* フィルター切替 */}
+            <div className="filter-selector">
+              {[
+                { key: "reading", label: "読み方なし" },
+                { key: "meaning", label: "意味なし" },
+                { key: "word",    label: "言葉なし" },
+              ].map((f) => (
+                <button
+                  key={f.key}
+                  className={`row-btn ${missingFilter === f.key ? "active" : ""}`}
+                  onClick={() => setMissingFilter(f.key)}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="search-hint" style={{ marginBottom: "1rem" }}>
+              {missingFilter === "reading" && "漢字または英字を含むのに「読み方」が未入力のエントリ"}
+              {missingFilter === "meaning" && "「意味」が未入力のエントリ"}
+              {missingFilter === "word"    && "「言葉」が未入力のエントリ"}
+            </p>
+
             {!allLoaded && <div className="loading">読み込み中…</div>}
-            {allLoaded && missingReadingEntries.length === 0 && (
-              <div className="empty-state">✓ 未入力のエントリはありません</div>
+            {allLoaded && missingEntries.length === 0 && (
+              <div className="empty-state">✓ 該当するエントリはありません</div>
             )}
-            {missingReadingEntries.length > 0 && (
+            {missingEntries.length > 0 && (
               <div className="results-section">
-                <div className="results-count">{missingReadingEntries.length} 件</div>
+                <div className="results-count">{missingEntries.length} 件</div>
                 <div className="entry-list">
-                  {missingReadingEntries.map((entry) => (
+                  {missingEntries.map((entry) => (
                     <EntryCard
                       key={entry.id}
                       entry={entry}
