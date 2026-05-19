@@ -227,7 +227,7 @@ export default function App() {
     Object.entries(allData).forEach(([rowName, pages]) => {
       pages?.forEach((p) => {
         let hit = false;
-        if (missingFilter === "reading") hit = containsKanjiOrAlphabet(p.言葉) && !p.読み方;
+        if (missingFilter === "reading") hit = containsKanjiOrAlphabet(p.言葉) && (!p.読み方 || containsKanjiOrAlphabet(p.読み方));
         if (missingFilter === "meaning") hit = !p.意味;
         if (missingFilter === "word")    hit = !p.言葉;
         if (hit) results.push({ ...p, _row: rowName });
