@@ -7,12 +7,18 @@ import {
   searchAllDatabases,
   addEntry,
   deletePage,
+  updateEntry,
   prefetchAllDatabases,
   invalidateAllCache,
 } from "./notionApi";
 import "./App.css";
 
 const STORAGE_KEY = "notion_memo_token";
+
+function containsKanjiOrAlphabet(word) {
+  if (!word) return false;
+  return [...word].some((c) => isKanjiOrAlphabet(c));
+}
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem(STORAGE_KEY) || "");
@@ -37,10 +43,10 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // loadRow を先に定義
+  // ── loadRow ──────────────────────────────────
   const loadRow = useCallback(async (row) => {
     setLoadingRows((prev) => {
-      if (prev.has(row)) return prev; // 取得中なら何もしない
+      if (prev.has(row)) return prev;
       const next = new Set(prev);
       next.add(row);
       return next;
@@ -59,7 +65,6 @@ export default function App() {
     }
   }, [token]);
 
-  // ログイン後すぐに全DB並列取得を開始
   useEffect(() => {
     if (!isAuthed || !token) return;
     prefetchAllDatabases(token);
@@ -74,6 +79,27 @@ export default function App() {
     setAutoRow(classifyKana(form.言葉, form.読み方));
   }, [form.言葉, form.読み方]);
 
+  // allData のエントリを1件更新するヘルパー
+  const updateEntryInState = useCallback((pageId, updated) => {
+    setAllData((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((row) => {
+        if (next[row]) {
+          next[row] = next[row].map((p) =>
+            p.id === pageId ? { ...p, ...updated } : p
+          );
+        }
+      });
+      return next;
+    });
+    setSearchResults((prev) =>
+      prev
+        ? prev.map((p) => (p.id === pageId ? { ...p, ...updated } : p))
+        : prev
+    );
+  }, []);
+
+  // ── 認証 ─────────────────────────────────────
   const handleAuth = (e) => {
     e.preventDefault();
     const t = tokenInput.trim();
@@ -91,6 +117,7 @@ export default function App() {
     setAllData({});
   };
 
+  // ── 追加 ─────────────────────────────────────
   const handleAdd = async (e) => {
     e.preventDefault();
     if (!form.言葉.trim()) return;
@@ -114,6 +141,7 @@ export default function App() {
     }
   };
 
+  // ── 検索 ─────────────────────────────────────
   const allLoaded = useMemo(
     () => Object.keys(DB_MAP).every((row) => !!allData[row]),
     [allData]
@@ -151,6 +179,7 @@ export default function App() {
     }
   };
 
+  // ── 削除 ─────────────────────────────────────
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
@@ -177,16 +206,10 @@ export default function App() {
     }
   };
 
+  // ── 派生値 ───────────────────────────────────
   const browseData = allData[selectedRow] ?? [];
   const isBrowseLoading = loadingRows.has(selectedRow);
 
-  // 言葉の中に漢字または英字が1文字でも含まれるか判定
-  function containsKanjiOrAlphabet(word) {
-    if (!word) return false;
-    return [...word].some((c) => isKanjiOrAlphabet(c));
-  }
-
-  // 漢字/英字を含むのに読み方が空のエントリを全DBから抽出
   const missingReadingEntries = useMemo(() => {
     const results = [];
     Object.entries(allData).forEach(([rowName, pages]) => {
@@ -199,9 +222,9 @@ export default function App() {
     return results;
   }, [allData]);
 
-  // 追加フォーム: 漢字/英字を含むのに読み方が空かどうか
   const needsReadingWarning = containsKanjiOrAlphabet(form.言葉) && !form.読み方.trim();
 
+  // ── 認証画面 ─────────────────────────────────
   if (!isAuthed) {
     return (
       <div className="auth-screen">
@@ -264,6 +287,7 @@ export default function App() {
 
       <main className="main-content">
 
+        {/* ── 追加タブ ── */}
         {activeTab === "add" && (
           <div className="tab-panel">
             <div className="panel-header">
@@ -327,6 +351,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ── 検索タブ ── */}
         {activeTab === "search" && (
           <div className="tab-panel">
             <div className="panel-header">
@@ -356,7 +381,14 @@ export default function App() {
                 <div className="results-count">{searchResults.length} 件</div>
                 <div className="entry-list">
                   {searchResults.map((entry) => (
-                    <EntryCard key={entry.id} entry={entry} showRow onDelete={() => setDeleteTarget(entry)} />
+                    <EntryCard
+                      key={entry.id}
+                      entry={entry}
+                      showRow
+                      token={token}
+                      onDelete={() => setDeleteTarget(entry)}
+                      onUpdate={updateEntryInState}
+                    />
                   ))}
                 </div>
               </div>
@@ -367,6 +399,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ── 一覧タブ ── */}
         {activeTab === "browse" && (
           <div className="tab-panel">
             <div className="panel-header">
@@ -390,7 +423,13 @@ export default function App() {
                 <div className="results-count">{browseData.length} 件</div>
                 <div className="entry-list">
                   {browseData.map((entry) => (
-                    <EntryCard key={entry.id} entry={entry} onDelete={() => setDeleteTarget(entry)} />
+                    <EntryCard
+                      key={entry.id}
+                      entry={entry}
+                      token={token}
+                      onDelete={() => setDeleteTarget(entry)}
+                      onUpdate={updateEntryInState}
+                    />
                   ))}
                 </div>
               </div>
@@ -400,6 +439,8 @@ export default function App() {
             )}
           </div>
         )}
+
+        {/* ── 要確認タブ ── */}
         {activeTab === "missing" && (
           <div className="tab-panel">
             <div className="panel-header">
@@ -415,7 +456,14 @@ export default function App() {
                 <div className="results-count">{missingReadingEntries.length} 件</div>
                 <div className="entry-list">
                   {missingReadingEntries.map((entry) => (
-                    <EntryCard key={entry.id} entry={entry} showRow onDelete={() => setDeleteTarget(entry)} />
+                    <EntryCard
+                      key={entry.id}
+                      entry={entry}
+                      showRow
+                      token={token}
+                      onDelete={() => setDeleteTarget(entry)}
+                      onUpdate={updateEntryInState}
+                    />
                   ))}
                 </div>
               </div>
@@ -424,6 +472,7 @@ export default function App() {
         )}
       </main>
 
+      {/* 削除確認モーダル */}
       {deleteTarget && (
         <div className="modal-overlay" onClick={() => !isDeleting && setDeleteTarget(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -444,7 +493,96 @@ export default function App() {
   );
 }
 
-function EntryCard({ entry, showRow, onDelete }) {
+// ── EntryCard（インライン編集対応）─────────────
+function EntryCard({ entry, showRow, token, onDelete, onUpdate }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    言葉: entry.言葉,
+    読み方: entry.読み方,
+    意味: entry.意味,
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  const handleEdit = () => {
+    setEditForm({ 言葉: entry.言葉, 読み方: entry.読み方, 意味: entry.意味 });
+    setSaveError("");
+    setIsEditing(true);
+  };
+
+  const handleCancel = () => {
+    setIsEditing(false);
+    setSaveError("");
+  };
+
+  const handleSave = async () => {
+    if (!editForm.言葉.trim()) return;
+    setIsSaving(true);
+    setSaveError("");
+    try {
+      await updateEntry(token, entry.id, {
+        言葉: editForm.言葉.trim(),
+        読み方: editForm.読み方.trim(),
+        意味: editForm.意味.trim(),
+      });
+      onUpdate(entry.id, {
+        言葉: editForm.言葉.trim(),
+        読み方: editForm.読み方.trim(),
+        意味: editForm.意味.trim(),
+      });
+      setIsEditing(false);
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div className="entry-card editing">
+        <div className="entry-main">
+          {showRow && entry._row && (
+            <div className="entry-row-badge" style={{ marginBottom: "0.5rem" }}>{entry._row}</div>
+          )}
+          <div className="edit-form-group">
+            <label>言葉</label>
+            <input
+              type="text"
+              value={editForm.言葉}
+              onChange={(e) => setEditForm({ ...editForm, 言葉: e.target.value })}
+            />
+          </div>
+          <div className="edit-form-group">
+            <label>読み方</label>
+            <input
+              type="text"
+              value={editForm.読み方}
+              onChange={(e) => setEditForm({ ...editForm, 読み方: e.target.value })}
+              placeholder="読み方を入力"
+            />
+          </div>
+          <div className="edit-form-group">
+            <label>意味</label>
+            <textarea
+              value={editForm.意味}
+              onChange={(e) => setEditForm({ ...editForm, 意味: e.target.value })}
+              rows={3}
+              placeholder="意味を入力"
+            />
+          </div>
+          {saveError && <div className="status-message error" style={{ marginTop: "0.5rem" }}>✗ {saveError}</div>}
+          <div className="edit-actions">
+            <button className="btn-secondary" onClick={handleCancel} disabled={isSaving}>キャンセル</button>
+            <button className="btn-primary" onClick={handleSave} disabled={!editForm.言葉.trim() || isSaving}>
+              {isSaving ? "保存中…" : "保存"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="entry-card">
       <div className="entry-main">
@@ -457,7 +595,10 @@ function EntryCard({ entry, showRow, onDelete }) {
         {entry.読み方 && <div className="entry-reading">{entry.読み方}</div>}
         {entry.意味 && <div className="entry-meaning">{entry.意味}</div>}
       </div>
-      <button className="btn-delete" onClick={onDelete} title="削除" aria-label="削除">🗑</button>
+      <div className="entry-actions">
+        <button className="btn-edit" onClick={handleEdit} title="編集" aria-label="編集">✏️</button>
+        <button className="btn-delete" onClick={onDelete} title="削除" aria-label="削除">🗑</button>
+      </div>
     </div>
   );
 }
