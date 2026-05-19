@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   DB_MAP,
+  isKanjiOrAlphabet,
   classifyKana,
   queryDatabase,
   searchAllDatabases,
@@ -179,6 +180,28 @@ export default function App() {
   const browseData = allData[selectedRow] ?? [];
   const isBrowseLoading = loadingRows.has(selectedRow);
 
+  // 言葉の中に漢字または英字が1文字でも含まれるか判定
+  function containsKanjiOrAlphabet(word) {
+    if (!word) return false;
+    return [...word].some((c) => isKanjiOrAlphabet(c));
+  }
+
+  // 漢字/英字を含むのに読み方が空のエントリを全DBから抽出
+  const missingReadingEntries = useMemo(() => {
+    const results = [];
+    Object.entries(allData).forEach(([rowName, pages]) => {
+      pages?.forEach((p) => {
+        if (containsKanjiOrAlphabet(p.言葉) && !p.読み方) {
+          results.push({ ...p, _row: rowName });
+        }
+      });
+    });
+    return results;
+  }, [allData]);
+
+  // 追加フォーム: 漢字/英字を含むのに読み方が空かどうか
+  const needsReadingWarning = containsKanjiOrAlphabet(form.言葉) && !form.読み方.trim();
+
   if (!isAuthed) {
     return (
       <div className="auth-screen">
@@ -227,6 +250,7 @@ export default function App() {
           { key: "add", label: "＋ 追加" },
           { key: "search", label: "🔍 検索" },
           { key: "browse", label: "📋 一覧" },
+          { key: "missing", label: missingReadingEntries.length > 0 ? `⚠️ 要確認 (${missingReadingEntries.length})` : "⚠️ 要確認" },
         ].map((t) => (
           <button
             key={t.key}
@@ -281,6 +305,11 @@ export default function App() {
                   rows={4}
                 />
               </div>
+              {needsReadingWarning && (
+                <div className="status-message warning">
+                  ⚠️ 漢字または英字が含まれていますが「読み方」が入力されていません。このまま追加しますか？
+                </div>
+              )}
               <button
                 type="submit"
                 className="btn-primary"
@@ -368,6 +397,28 @@ export default function App() {
             )}
             {!isBrowseLoading && browseData.length === 0 && (
               <div className="empty-state">データがありません</div>
+            )}
+          </div>
+        )}
+        {activeTab === "missing" && (
+          <div className="tab-panel">
+            <div className="panel-header">
+              <h2>要確認リスト</h2>
+              <p>漢字または英字を含むのに「読み方」が未入力のエントリです</p>
+            </div>
+            {!allLoaded && <div className="loading">読み込み中…</div>}
+            {allLoaded && missingReadingEntries.length === 0 && (
+              <div className="empty-state">✓ 未入力のエントリはありません</div>
+            )}
+            {missingReadingEntries.length > 0 && (
+              <div className="results-section">
+                <div className="results-count">{missingReadingEntries.length} 件</div>
+                <div className="entry-list">
+                  {missingReadingEntries.map((entry) => (
+                    <EntryCard key={entry.id} entry={entry} showRow onDelete={() => setDeleteTarget(entry)} />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
