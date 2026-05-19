@@ -349,12 +349,12 @@ export default function App() {
           <div className="tab-panel">
             <div className="panel-header">
               <h2>新しい言葉を追加</h2>
-              <p>「言葉」の頭文字でデータベースが自動選択されます</p>
+              <p></p>
             </div>
             <form onSubmit={handleAdd} className="add-form">
               <div className="form-group">
                 <label>言葉 <span className="required">*</span></label>
-                <input type="text" value={form.言葉} onChange={(e) => setForm({ ...form, 言葉: e.target.value })} placeholder="例：ルービックキューブ" required />
+                <input type="text" value={form.言葉} onChange={(e) => setForm({ ...form, 言葉: e.target.value })} placeholder="" required />
               </div>
               {form.言葉 && (
                 <div className="auto-classify">
@@ -364,11 +364,11 @@ export default function App() {
               )}
               <div className="form-group">
                 <label>漢字または英字の読み方</label>
-                <input type="text" value={form.読み方} onChange={(e) => setForm({ ...form, 読み方: e.target.value })} placeholder="例：るーびっくきゅーぶ" />
+                <input type="text" value={form.読み方} onChange={(e) => setForm({ ...form, 読み方: e.target.value })} placeholder="" />
               </div>
               <div className="form-group">
                 <label>意味</label>
-                <textarea value={form.意味} onChange={(e) => setForm({ ...form, 意味: e.target.value })} placeholder="例：6面体のパズル。" rows={4} />
+                <textarea value={form.意味} onChange={(e) => setForm({ ...form, 意味: e.target.value })} placeholder="。" rows={4} />
               </div>
               {needsReadingWarning && (
                 <div className="status-message warning">⚠️ 漢字または英字が含まれていますが「読み方」が入力されていません。このまま追加しますか？</div>
