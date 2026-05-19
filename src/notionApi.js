@@ -11,7 +11,7 @@ export const DB_MAP = {
 };
 
 // ── 分類ロジック ──────────────────────────────
-function isKanjiOrAlphabet(char) {
+export function isKanjiOrAlphabet(char) {
   if (!char) return false;
   const code = char.charCodeAt(0);
   const isAlphabet = (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
