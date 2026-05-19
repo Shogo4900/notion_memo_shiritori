@@ -628,3 +628,17 @@ body {
   opacity: 1;
   background: var(--accent-light);
 }
+
+/* ===== フィルターセレクター・検索ヒント ===== */
+.filter-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 0.75rem;
+}
+
+.search-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
