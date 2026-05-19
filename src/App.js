@@ -415,13 +415,13 @@ export default function App() {
                   <div className="form-group">
                     <label>頭文字</label>
                     <input type="text" value={advFirst} onChange={(e) => setAdvFirst(e.target.value)}
-                      placeholder="例：るら" className="char-input" />
+                      placeholder="" className="char-input" />
                   </div>
                   <div className="advanced-sep">→</div>
                   <div className="form-group">
                     <label>末尾文字</label>
                     <input type="text" value={advLast} onChange={(e) => setAdvLast(e.target.value)}
-                      placeholder="例：る" className="char-input" />
+                      placeholder="" className="char-input" />
                   </div>
                 </div>
                 <p className="search-hint"></p>
@@ -516,12 +516,12 @@ export default function App() {
               ))}
             </div>
             <p className="search-hint" style={{ marginBottom: "1rem" }}>
-              {missingFilter === "reading" && "漢字または英字を含むのに「読み方」が未入力、または読み方に漢字・英字が含まれるエントリ"}
-              {missingFilter === "meaning" && "「意味」が未入力のエントリ"}
-              {missingFilter === "word"    && "「言葉」が未入力のエントリ"}
+              {missingFilter === "reading" && ""}
+              {missingFilter === "meaning" && ""}
+              {missingFilter === "word"    && ""}
             </p>
             {!allLoaded && <div className="loading">読み込み中…</div>}
-            {allLoaded && missingEntries.length === 0 && <div className="empty-state">✓ 該当するエントリはありません</div>}
+            {allLoaded && missingEntries.length === 0 && <div className="empty-state">なし</div>}
             {missingEntries.length > 0 && (
               <div className="results-section">
                 <div className="results-count">{missingEntries.length} 件</div>
