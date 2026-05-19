@@ -546,3 +546,17 @@ body {
   opacity: 0.6;
   margin-left: 2px;
 }
+
+.status-message.warning {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+@media (prefers-color-scheme: dark) {
+  .status-message.warning {
+    background: #2d1f00;
+    color: #fcd34d;
+    border-color: #92400e;
+  }
+}
