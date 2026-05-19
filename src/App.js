@@ -368,7 +368,7 @@ export default function App() {
               </div>
               <div className="form-group">
                 <label>意味</label>
-                <textarea value={form.意味} onChange={(e) => setForm({ ...form, 意味: e.target.value })} placeholder="。" rows={4} />
+                <textarea value={form.意味} onChange={(e) => setForm({ ...form, 意味: e.target.value })} placeholder="" rows={4} />
               </div>
               {needsReadingWarning && (
                 <div className="status-message warning">⚠️ 漢字または英字が含まれていますが「読み方」が入力されていません。このまま追加しますか？</div>
@@ -403,7 +403,7 @@ export default function App() {
               <form onSubmit={handleSearchFast} className="search-form">
                 <div className="search-input-row">
                   <input type="text" value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)}
-                    placeholder={searchMode === "meaning" ? "意味のキーワードを入力…" : "言葉・読み方のキーワードを入力…"} />
+                    placeholder={searchMode === "meaning" ? "" : ""} />
                   <button type="submit" className="btn-primary" disabled={!searchKeyword.trim() || isSearching}>
                     {isSearching ? "検索中…" : "検索"}
                   </button>
@@ -424,7 +424,7 @@ export default function App() {
                       placeholder="例：る" className="char-input" />
                   </div>
                 </div>
-                <p className="search-hint">複数文字の前方一致・後方一致（例：「あい」→「アイスバイル」など）。ひらがな・カタカナは同一視します。</p>
+                <p className="search-hint"></p>
                 <button type="submit" className="btn-primary" disabled={!advFirst.trim() && !advLast.trim()}>検索</button>
               </form>
             )}
