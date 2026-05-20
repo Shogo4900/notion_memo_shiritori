@@ -274,25 +274,29 @@ export default function App() {
 
   // 要確認タブ用: 全エントリの中から重複グループを抽出
   const duplicateGroups = useMemo(() => {
-    const wordMap    = {};
+    // 「実質的な読み」= 漢字/英字始まりなら読み方、それ以外は言葉をひらがな正規化したもの
+    // これで「あああ」と「嗚呼あ（読み：あああ）」が同じキーになる
+    const effectiveReading = (p) => {
+      if (!p.言葉) return normalizeKana(p.読み方 || "");
+      if (containsKanjiOrAlphabet(p.言葉[0]) && p.読み方) return normalizeKana(p.読み方);
+      return normalizeKana(p.言葉);
+    };
+
     const readingMap = {};
     allEntries.forEach((p) => {
-      const w = normalizeKana(p.言葉);
-      const r = normalizeKana(p.読み方);
-      if (w) { if (!wordMap[w]) wordMap[w] = []; wordMap[w].push(p); }
-      if (r) { if (!readingMap[r]) readingMap[r] = []; readingMap[r].push(p); }
+      const key = effectiveReading(p);
+      if (!key) return;
+      if (!readingMap[key]) readingMap[key] = [];
+      readingMap[key].push(p);
     });
+
     const groups = [];
-    const seen = new Set();
-    const addGroup = (entries, label) => {
+    Object.entries(readingMap).forEach(([key, entries]) => {
       if (entries.length < 2) return;
-      const key = entries.map((e) => e.id).sort().join(",");
-      if (seen.has(key)) return;
-      seen.add(key);
+      // 代表ラベル: グループ内の言葉を列挙
+      const label = entries.map((e) => e.言葉 || "（空）").join(" / ");
       groups.push({ label, entries });
-    };
-    Object.entries(wordMap).forEach(([w, entries]) => addGroup(entries, `言葉：${entries[0].言葉}`));
-    Object.entries(readingMap).forEach(([r, entries]) => addGroup(entries, `読み方：${entries[0].読み方}`));
+    });
     return groups;
   }, [allEntries]);
 
@@ -341,7 +345,7 @@ export default function App() {
           <p className="auth-desc">Notion Integration Token を入力してください</p>
           <form onSubmit={handleAuth}>
             <input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)}
-              placeholder="secret_xxxxxxxxxxxx" className="token-input" autoComplete="off" />
+              className="token-input" autoComplete="off" />
             <button type="submit" className="btn-primary" disabled={!tokenInput.trim()}>接続する</button>
           </form>
           <p className="auth-help">
@@ -391,7 +395,7 @@ export default function App() {
             <form onSubmit={handleAdd} className="add-form">
               <div className="form-group">
                 <label>言葉 <span className="required">*</span></label>
-                <input type="text" value={form.言葉} onChange={(e) => setForm({ ...form, 言葉: e.target.value })} placeholder="例：ルービックキューブ" required />
+                <input type="text" value={form.言葉} onChange={(e) => setForm({ ...form, 言葉: e.target.value })} required />
               </div>
               {form.言葉 && (
                 <div className="auto-classify">
@@ -401,11 +405,11 @@ export default function App() {
               )}
               <div className="form-group">
                 <label>漢字または英字の読み方</label>
-                <input type="text" value={form.読み方} onChange={(e) => setForm({ ...form, 読み方: e.target.value })} placeholder="例：るーびっくきゅーぶ" />
+                <input type="text" value={form.読み方} onChange={(e) => setForm({ ...form, 読み方: e.target.value })} />
               </div>
               <div className="form-group">
                 <label>意味</label>
-                <textarea value={form.意味} onChange={(e) => setForm({ ...form, 意味: e.target.value })} placeholder="例：6面体のパズル。" rows={4} />
+                <textarea value={form.意味} onChange={(e) => setForm({ ...form, 意味: e.target.value })} rows={4} />
               </div>
               {needsReadingWarning && (
                 <div className="status-message warning">⚠️ 漢字または英字が含まれていますが「読み方」が入力されていません。このまま追加しますか？</div>
@@ -464,13 +468,13 @@ export default function App() {
                   <div className="form-group">
                     <label>頭文字</label>
                     <input type="text" value={advFirst} onChange={(e) => setAdvFirst(e.target.value)}
-                      placeholder="例：るら" className="char-input" />
+                      className="char-input" />
                   </div>
                   <div className="advanced-sep">→</div>
                   <div className="form-group">
                     <label>末尾文字</label>
                     <input type="text" value={advLast} onChange={(e) => setAdvLast(e.target.value)}
-                      placeholder="例：る" className="char-input" />
+                      className="char-input" />
                   </div>
                 </div>
                 <p className="search-hint">複数文字の前方一致・後方一致（例：「あい」→「アイスバイル」など）。ひらがな・カタカナは同一視します。</p>
@@ -655,11 +659,11 @@ function EntryCard({ entry, showRow, token, onDelete, onUpdate }) {
           </div>
           <div className="edit-form-group">
             <label>読み方</label>
-            <input type="text" value={editForm.読み方} onChange={(e) => setEditForm({ ...editForm, 読み方: e.target.value })} placeholder="読み方を入力" />
+            <input type="text" value={editForm.読み方} onChange={(e) => setEditForm({ ...editForm, 読み方: e.target.value })} />
           </div>
           <div className="edit-form-group">
             <label>意味</label>
-            <textarea value={editForm.意味} onChange={(e) => setEditForm({ ...editForm, 意味: e.target.value })} rows={3} placeholder="意味を入力" />
+            <textarea value={editForm.意味} onChange={(e) => setEditForm({ ...editForm, 意味: e.target.value })} rows={3} />
           </div>
           {saveError && <div className="status-message error" style={{ marginTop: "0.5rem" }}>✗ {saveError}</div>}
           <div className="edit-actions">
