@@ -272,6 +272,43 @@ export default function App() {
     return results;
   }, [allData, missingFilter]);
 
+  // 要確認タブ用: 全エントリの中から重複グループを抽出
+  const duplicateGroups = useMemo(() => {
+    const wordMap    = {};
+    const readingMap = {};
+    allEntries.forEach((p) => {
+      const w = normalizeKana(p.言葉);
+      const r = normalizeKana(p.読み方);
+      if (w) { if (!wordMap[w]) wordMap[w] = []; wordMap[w].push(p); }
+      if (r) { if (!readingMap[r]) readingMap[r] = []; readingMap[r].push(p); }
+    });
+    const groups = [];
+    const seen = new Set();
+    const addGroup = (entries, label) => {
+      if (entries.length < 2) return;
+      const key = entries.map((e) => e.id).sort().join(",");
+      if (seen.has(key)) return;
+      seen.add(key);
+      groups.push({ label, entries });
+    };
+    Object.entries(wordMap).forEach(([w, entries]) => addGroup(entries, `言葉：${entries[0].言葉}`));
+    Object.entries(readingMap).forEach(([r, entries]) => addGroup(entries, `読み方：${entries[0].読み方}`));
+    return groups;
+  }, [allEntries]);
+
+  // 追加フォームの重複チェック（言葉 or 読み方が完全一致）
+  const duplicateCandidates = useMemo(() => {
+    if (!allLoaded) return [];
+    const word = form.言葉.trim();
+    const reading = form.読み方.trim();
+    if (!word && !reading) return [];
+    return allEntries.filter((p) => {
+      const wordMatch    = word    && normalizeKana(p.言葉)  === normalizeKana(word);
+      const readingMatch = reading && normalizeKana(p.読み方) === normalizeKana(reading);
+      return wordMatch || readingMatch;
+    });
+  }, [allEntries, form.言葉, form.読み方, allLoaded]);
+
   const totalMissing = useMemo(() => {
     let count = 0;
     Object.values(allData).forEach((pages) => {
@@ -279,8 +316,8 @@ export default function App() {
         if ((containsKanjiOrAlphabet(p.言葉) && (!p.読み方 || containsKanjiOrAlphabet(p.読み方))) || !p.意味 || !p.言葉) count++;
       });
     });
-    return count;
-  }, [allData]);
+    return count + duplicateGroups.length;
+  }, [allData, duplicateGroups]);
 
   // 文字別単語数（統計）
   const charStats = useMemo(() => {
@@ -349,12 +386,12 @@ export default function App() {
           <div className="tab-panel">
             <div className="panel-header">
               <h2>新しい言葉を追加</h2>
-              <p></p>
+              <p>「言葉」の頭文字でデータベースが自動選択されます</p>
             </div>
             <form onSubmit={handleAdd} className="add-form">
               <div className="form-group">
                 <label>言葉 <span className="required">*</span></label>
-                <input type="text" value={form.言葉} onChange={(e) => setForm({ ...form, 言葉: e.target.value })} placeholder="" required />
+                <input type="text" value={form.言葉} onChange={(e) => setForm({ ...form, 言葉: e.target.value })} placeholder="例：ルービックキューブ" required />
               </div>
               {form.言葉 && (
                 <div className="auto-classify">
@@ -364,14 +401,26 @@ export default function App() {
               )}
               <div className="form-group">
                 <label>漢字または英字の読み方</label>
-                <input type="text" value={form.読み方} onChange={(e) => setForm({ ...form, 読み方: e.target.value })} placeholder="" />
+                <input type="text" value={form.読み方} onChange={(e) => setForm({ ...form, 読み方: e.target.value })} placeholder="例：るーびっくきゅーぶ" />
               </div>
               <div className="form-group">
                 <label>意味</label>
-                <textarea value={form.意味} onChange={(e) => setForm({ ...form, 意味: e.target.value })} placeholder="" rows={4} />
+                <textarea value={form.意味} onChange={(e) => setForm({ ...form, 意味: e.target.value })} placeholder="例：6面体のパズル。" rows={4} />
               </div>
               {needsReadingWarning && (
                 <div className="status-message warning">⚠️ 漢字または英字が含まれていますが「読み方」が入力されていません。このまま追加しますか？</div>
+              )}
+              {duplicateCandidates.length > 0 && (
+                <div className="duplicate-warning">
+                  <div className="duplicate-warning-title">⚠️ 似た言葉が {duplicateCandidates.length} 件あります</div>
+                  {duplicateCandidates.map((p) => (
+                    <div key={p.id} className="duplicate-item">
+                      <span className="duplicate-word">{p.言葉}</span>
+                      {p.読み方 && <span className="duplicate-reading">（{p.読み方}）</span>}
+                      {p._row && <span className="entry-row-badge">{p._row}</span>}
+                    </div>
+                  ))}
+                </div>
               )}
               <button type="submit" className="btn-primary" disabled={!form.言葉.trim() || addStatus === "loading"}>
                 {addStatus === "loading" ? "追加中…" : "追加する"}
@@ -403,7 +452,7 @@ export default function App() {
               <form onSubmit={handleSearchFast} className="search-form">
                 <div className="search-input-row">
                   <input type="text" value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)}
-                    placeholder={searchMode === "meaning" ? "" : ""} />
+                    placeholder={searchMode === "meaning" ? "意味のキーワードを入力…" : "言葉・読み方のキーワードを入力…"} />
                   <button type="submit" className="btn-primary" disabled={!searchKeyword.trim() || isSearching}>
                     {isSearching ? "検索中…" : "検索"}
                   </button>
@@ -415,16 +464,16 @@ export default function App() {
                   <div className="form-group">
                     <label>頭文字</label>
                     <input type="text" value={advFirst} onChange={(e) => setAdvFirst(e.target.value)}
-                      placeholder="" className="char-input" />
+                      placeholder="例：るら" className="char-input" />
                   </div>
                   <div className="advanced-sep">→</div>
                   <div className="form-group">
                     <label>末尾文字</label>
                     <input type="text" value={advLast} onChange={(e) => setAdvLast(e.target.value)}
-                      placeholder="" className="char-input" />
+                      placeholder="例：る" className="char-input" />
                   </div>
                 </div>
-                <p className="search-hint"></p>
+                <p className="search-hint">複数文字の前方一致・後方一致（例：「あい」→「アイスバイル」など）。ひらがな・カタカナは同一視します。</p>
                 <button type="submit" className="btn-primary" disabled={!advFirst.trim() && !advLast.trim()}>検索</button>
               </form>
             )}
@@ -506,9 +555,10 @@ export default function App() {
             <div className="panel-header"><h2>要確認リスト</h2></div>
             <div className="filter-selector">
               {[
-                { key: "reading", label: "読み方なし" },
-                { key: "meaning", label: "意味なし" },
-                { key: "word",    label: "言葉なし" },
+                { key: "reading",   label: "読み方なし" },
+                { key: "meaning",   label: "意味なし" },
+                { key: "word",      label: "言葉なし" },
+                { key: "duplicate", label: `重複 (${duplicateGroups.length})` },
               ].map((f) => (
                 <button key={f.key} className={`row-btn ${missingFilter === f.key ? "active" : ""}`} onClick={() => setMissingFilter(f.key)}>
                   {f.label}
@@ -516,13 +566,15 @@ export default function App() {
               ))}
             </div>
             <p className="search-hint" style={{ marginBottom: "1rem" }}>
-              {missingFilter === "reading" && ""}
-              {missingFilter === "meaning" && ""}
-              {missingFilter === "word"    && ""}
+              {missingFilter === "reading"   && "漢字または英字を含むのに「読み方」が未入力、または読み方に漢字・英字が含まれるエントリ"}
+              {missingFilter === "meaning"   && "「意味」が未入力のエントリ"}
+              {missingFilter === "word"      && "「言葉」が未入力のエントリ"}
+              {missingFilter === "duplicate" && "「言葉」または「読み方」が同じエントリのグループ"}
             </p>
             {!allLoaded && <div className="loading">読み込み中…</div>}
-            {allLoaded && missingEntries.length === 0 && <div className="empty-state">なし</div>}
-            {missingEntries.length > 0 && (
+            {allLoaded && missingFilter !== "duplicate" && missingEntries.length === 0 && <div className="empty-state">✓ 該当するエントリはありません</div>}
+            {allLoaded && missingFilter === "duplicate" && duplicateGroups.length === 0 && <div className="empty-state">✓ 重複するエントリはありません</div>}
+            {missingFilter !== "duplicate" && missingEntries.length > 0 && (
               <div className="results-section">
                 <div className="results-count">{missingEntries.length} 件</div>
                 <div className="entry-list">
@@ -530,6 +582,21 @@ export default function App() {
                     <EntryCard key={entry.id} entry={entry} showRow token={token} onDelete={() => setDeleteTarget(entry)} onUpdate={updateEntryInState} />
                   ))}
                 </div>
+              </div>
+            )}
+            {missingFilter === "duplicate" && duplicateGroups.length > 0 && (
+              <div className="results-section">
+                <div className="results-count">{duplicateGroups.length} グループ</div>
+                {duplicateGroups.map((group, i) => (
+                  <div key={i} className="duplicate-group">
+                    <div className="duplicate-group-label">{group.label}</div>
+                    <div className="entry-list">
+                      {group.entries.map((entry) => (
+                        <EntryCard key={entry.id} entry={entry} showRow token={token} onDelete={() => setDeleteTarget(entry)} onUpdate={updateEntryInState} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
