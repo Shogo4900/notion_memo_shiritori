@@ -67,6 +67,7 @@ export default function App() {
   const [searchKeyword, setSearchKeyword] = useState("");
   const [advFirst, setAdvFirst] = useState("");  // 頭文字
   const [advLast, setAdvLast] = useState("");    // 末尾文字
+  const [advTarget, setAdvTarget] = useState("reading"); // "reading" | "word"
   const [searchResults, setSearchResults] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
 
@@ -174,26 +175,23 @@ export default function App() {
     return results;
   }, [allData]);
 
-  const searchInCache = useCallback((keyword, mode, first, last) => {
+  const searchInCache = useCallback((keyword, mode, first, last, target = "reading") => {
     if (mode === "advanced") {
-      // 前方一致・後方一致（ひらがな・カタカナ同一視）
-      // 「あい」→ 言葉の先頭2文字が「あい」にマッチ
       const f = normalizeKana(first.trim());
       const l = normalizeKana(last.trim());
+      // target は引数から受け取る（"reading" or "word"）
       return allEntries.filter((p) => {
-        // 前方一致: 言葉(または読み方)をひらがな正規化して先頭がfで始まるか
-        if (f) {
-          const word = normalizeKana(p.言葉 || "");
+        // 検索対象文字列を決定
+        const getTarget = () => {
+          if (target === "word") return normalizeKana(p.言葉 || "");
+          // reading: 漢字/英字始まりなら読み方、それ以外は言葉
           const reading = normalizeKana(p.読み方 || "");
-          const wordToCheck = (containsKanjiOrAlphabet((p.言葉 || "")[0]) && reading)
-            ? reading : word;
-          if (!wordToCheck.startsWith(f)) return false;
-        }
-        // 後方一致: 言葉の末尾がlで終わるか
-        if (l) {
           const word = normalizeKana(p.言葉 || "");
-          if (!word.endsWith(l)) return false;
-        }
+          return (containsKanjiOrAlphabet((p.言葉 || "")[0]) && reading) ? reading : word;
+        };
+        const str = getTarget();
+        if (f && !str.startsWith(f)) return false;
+        if (l && !str.endsWith(l)) return false;
         return true;
       });
     }
@@ -208,7 +206,7 @@ export default function App() {
     e.preventDefault();
     if (searchMode === "advanced") {
       if (!advFirst.trim() && !advLast.trim()) return;
-      setSearchResults(searchInCache("", "advanced", advFirst, advLast));
+      setSearchResults(searchInCache("", "advanced", advFirst, advLast, advTarget));
       return;
     }
     if (!searchKeyword.trim()) return;
@@ -464,6 +462,13 @@ export default function App() {
               </form>
             ) : (
               <form onSubmit={handleSearchFast} className="search-form">
+                <div className="filter-selector" style={{ marginBottom: "0.75rem" }}>
+                  <button type="button" className={`row-btn ${advTarget === "reading" ? "active" : ""}`} onClick={() => setAdvTarget("reading")}>読み方</button>
+                  <button type="button" className={`row-btn ${advTarget === "word" ? "active" : ""}`} onClick={() => setAdvTarget("word")}>言葉</button>
+                </div>
+                <p className="search-hint">
+                  {advTarget === "reading" ? "漢字/英字の言葉は読み方で、それ以外は言葉で判定します" : "言葉フィールドをそのまま判定します"}
+                </p>
                 <div className="advanced-search-grid">
                   <div className="form-group">
                     <label>頭文字</label>
@@ -477,7 +482,7 @@ export default function App() {
                       className="char-input" />
                   </div>
                 </div>
-                <p className="search-hint">複数文字の前方一致・後方一致（例：「あい」→「アイスバイル」など）。ひらがな・カタカナは同一視します。</p>
+                <p className="search-hint">複数文字の前方一致・後方一致。ひらがな・カタカナは同一視します。</p>
                 <button type="submit" className="btn-primary" disabled={!advFirst.trim() && !advLast.trim()}>検索</button>
               </form>
             )}
