@@ -31,7 +31,8 @@ function normalizeKana(s) {
 // 漢字/英字始まりなら読み方の先頭、それ以外は言葉の先頭
 function effectiveFirst(entry) {
   if (!entry.言葉) return "";
-  if (containsKanjiOrAlphabet(entry.言葉[0]) && entry.読み方) return entry.読み方[0];
+  // 読み方があれば読み方の先頭（カタカナ語も含む）、なければ言葉の先頭
+  if (entry.読み方) return entry.読み方[0];
   return entry.言葉[0];
 }
 
@@ -184,10 +185,10 @@ export default function App() {
         // 検索対象文字列を決定
         const getTarget = () => {
           if (target === "word") return normalizeKana(p.言葉 || "");
-          // reading: 漢字/英字始まりなら読み方、それ以外は言葉
+          // reading: 読み方がある場合は読み方、なければ言葉をひらがな正規化
           const reading = normalizeKana(p.読み方 || "");
           const word = normalizeKana(p.言葉 || "");
-          return (containsKanjiOrAlphabet((p.言葉 || "")[0]) && reading) ? reading : word;
+          return reading || word;
         };
         const str = getTarget();
         if (f && !str.startsWith(f)) return false;
